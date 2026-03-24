@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>蓄电池健康状态（SOH）预测系统 - 机器学习在线演示</title>
+    <!-- Chart.js 用于绘图 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Math.js 用于矩阵运算（可选，也可手动实现） -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.7.0/math.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+        }
+        body {
+            background: #f4f7fc;
+            margin: 0;
+            padding: 20px;
+            color: #1e2a3a;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 32px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+            overflow: hidden;
+            padding: 24px 28px;
+        }
+        h1 {
+            font-size: 1.9rem;
+            margin-top: 0;
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        h1 small {
+            font-size: 0.8rem;
+            font-weight: normal;
+            background: #eef2ff;
+            padding: 4px 12px;
+            border-radius: 40px;
+            color: #2563eb;
+        }
+        .sub {
+            color: #4b5563;
+            border-left: 4px solid #3b82f6;
+            padding-left: 16px;
+            margin: 16px 0 24px 0;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 28px;
+            margin: 24px 0;
+        }
+        .card {
+            background: #ffffff;
+            border-radius: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            padding: 20px;
+            transition: all 0.2s;
+        }
+        .card h3 {
+            margin-top: 0;
+            margin-bottom: 16px;
+            font-weight: 600;
+            font-size: 1.3rem;
+            border-bottom: 2px solid #eef2ff;
+            padding-bottom: 8px;
+        }
+        .metrics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        .metric-box {
+            flex: 1;
+            background: #f8fafc;
+            border-radius: 20px;
+            padding: 12px 16px;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+        }
+        .metric-value {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #0f172a;
+        }
+        .metric-label {
+            font-size: 0.85rem;
+            color: #475569;
+            margin-top: 6px;
+        }
+        button {
+            background: #3b82f6;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 40px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 0.9rem;
+        }
+        button:hover {
+            background: #2563eb;
+            transform: scale(0.98);
+        }
+        .input-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .input-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .input-field label {
+            font-weight: 500;
+            font-size: 0.85rem;
+            color: #334155;
+        }
+        input {
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 16px;
+            font-size: 0.9rem;
+            transition: 0.2s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+        }
+        .result {
+            background: #eef2ff;
+            padding: 16px;
+            border-radius: 24px;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .prediction-number {
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #1e40af;
+        }
+        footer {
+            text-align: center;
+            margin-top: 32px;
+            font-size: 0.8rem;
+            color: #6c757d;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 20px;
+        }
+        canvas {
+            max-height: 400px;
+            width: 100%;
+        }
+        @media (max-width: 800px) {
+            .grid-2 { grid-template-columns: 1fr; }
+            .container { padding: 16px; }
+        }
+        .status-badge {
+            display: inline-block;
+            background: #dcfce7;
+            color: #15803d;
+            padding: 4px 12px;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        hr {
+            margin: 24px 0;
+            border: none;
+            border-top: 1px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>
+        🔋 蓄电池健康状态（SOH）预测
+        <small>机器学习 · 线性回归</small>
+    </h1>
+    <div class="sub">
+        基于充放电循环数据，预测电池剩余寿命百分比（0-100%）。包含特征工程、模型训练、评估与交互预测。
+    </div>
+
+    <!-- 主要区域：左：数据预览+评估 右：可视化+预测 -->
+    <div class="grid-2">
+        <!-- 左侧 -->
+        <div>
+            <div class="card">
+                <h3>📊 数据集概览</h3>
+                <div style="max-height: 280px; overflow-y: auto; border: 1px solid #eef2ff; border-radius: 16px;">
+                    <table id="data-table" style="width:100%; border-collapse: collapse; font-size: 0.8rem;">
+                        <thead style="background:#f1f5f9; position: sticky; top:0;">
+                            <tr><th>Cycle</th><th>Voltage</th><th>Current</th><th>Temp</th><th>Capacity</th><th>SOH%</th></tr>
+                        </thead>
+                        <tbody id="data-tbody"></tbody>
+                    </table>
+                </div>
+                <div style="margin-top: 12px; text-align: right;">
+                    <span class="status-badge">✔ 模拟500个循环数据</span>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <h3>📈 模型性能（测试集）</h3>
+                <div class="metrics">
+                    <div class="metric-box"><div class="metric-value" id="mse-val">--</div><div class="metric-label">均方误差 MSE</div></div>
+                    <div class="metric-box"><div class="metric-value" id="mae-val">--</div><div class="metric-label">平均绝对误差 MAE</div></div>
+                    <div class="metric-box"><div class="metric-value" id="r2-val">--</div><div class="metric-label">决定系数 R²</div></div>
+                </div>
+                <p style="font-size:0.8rem; color:#475569;">模型：多变量线性回归 + 特征工程（容量衰减率、电压变化、电流比率、滚动均值等）。使用梯度下降训练。</p>
+                <button id="retrain-btn">🔄 重新训练模型</button>
+                <span id="train-status" style="margin-left: 12px; font-size:0.8rem;"></span>
+            </div>
+        </div>
+
+        <!-- 右侧 -->
+        <div>
+            <div class="card">
+                <h3>🔍 真实值 vs 预测值（散点图）</h3>
+                <canvas id="scatterChart" width="400" height="300" style="width:100%; height:auto;"></canvas>
+            </div>
+
+            <div class="card" style="margin-top: 20px;">
+                <h3>🧪 单点预测（输入当前电池参数）</h3>
+                <div class="input-group">
+                    <div class="input-field"><label>循环次数 (Cycle)</label><input type="number" id="pred-cycle" value="150" step="1"></div>
+                    <div class="input-field"><label>电压 (V)</label><input type="number" id="pred-voltage" value="3.52" step="0.01"></div>
+                    <div class="input-field"><label>电流 (A)</label><input type="number" id="pred-current" value="19.5" step="0.1"></div>
+                    <div class="input-field"><label>温度 (℃)</label><input type="number" id="pred-temp" value="26.5" step="0.1"></div>
+                    <div class="input-field"><label>容量 (Ah)</label><input type="number" id="pred-capacity" value="85.2" step="0.1"></div>
+                </div>
+                <button id="predict-btn" style="width:100%;">🔮 预测健康状态 SOH</button>
+                <div id="prediction-result" class="result">
+                    <span style="font-weight:500;">预测结果</span><br>
+                    <span class="prediction-number" id="soh-predicted">--</span><span class="prediction-number" style="font-size:1.2rem;"> %</span>
+                    <div id="soh-advice" style="margin-top: 8px; font-size:0.85rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer>
+        ⚡ 基于线性回归机器学习模型，特征包括原始数据+工程特征（衰减率、电压变化、电流倍率、滑动均值）。模型在模拟数据集上训练，仅供参考。
+    </footer>
+</div>
+
+<script>
+    // --------------------------------------------
+    // 1. 生成模拟数据集 (完全符合题目背景)
+    // --------------------------------------------
+    function generateDataset(n = 500) {
+        const ratedCapacity = 100.0;
+        const cycles = Array.from({length: n}, (_, i) => i+1);
+        const capacity = [];
+        const soh = [];
+        const voltage = [];
+        const current = [];
+        const temperature = [];
+
+        for (let i = 0; i < n; i++) {
+            let c = cycles[i];
+            // 容量衰减: 线性 -0.08*cycle  + 平方根项 + 噪声
+            let cap = ratedCapacity + (-0.08 * c) + (-5 * Math.sqrt(c/50)) + (Math.random() - 0.5) * 0.8;
+            cap = Math.min(ratedCapacity, Math.max(50, cap));
+            capacity.push(cap);
+            soh.push(cap / ratedCapacity * 100);
+            // 电压: 基础3.6V + 正弦波动 - 缓慢下降 + 噪声
+            let v = 3.6 + 0.05 * Math.sin(c/100) - 0.001 * c + (Math.random() - 0.5)*0.04;
+            voltage.push(v);
+            // 电流: 均值20A左右
+            let curr = 20 + 5 * Math.sin(c/80) + (Math.random() - 0.5)*1.0;
+            current.push(curr);
+            // 温度: 25 + 小波动 + 上升趋势
+            let temp = 25 + 3 * Math.sin(c/60) + 0.01 * c + (Math.random() - 0.5)*0.6;
+            temperature.push(temp);
+        }
+        return { cycles, voltage, current, temperature, capacity, soh };
+    }
+
+    // 特征工程：根据原始数据构造特征矩阵 X (每行一个样本)
+    // 衍生特征: capacity_decay_rate, voltage_change, current_ratio, temp_change, rolling_mean(电压/电流/温度)
+    function buildFeatures(data) {
+        const n = data.cycles.length;
+        // 原始特征 + 衍生特征
+        const features = [];
+        // 为了计算滑动窗口均值，需要先准备原始值
+        for (let i = 0; i < n; i++) {
+            // 容量衰减率 (相对于首次容量)
+            const initCap = data.capacity[0];
+            const decayRate = (initCap - data.capacity[i]) / initCap;
+            // 电压变化: 与前一个样本的差值，第一个样本设为0
+            const voltChange = i === 0 ? 0 : data.voltage[i] - data.voltage[i-1];
+            // 电流倍率：相对于整体平均电流（先计算均值）
+            // 均值需要全局计算，稍后补
+            // 温度变化
+            const tempChange = i === 0 ? 0 : data.temperature[i] - data.temperature[i-1];
+            // 滚动窗口均值 (窗口=3)
+            let voltRoll = data.voltage[i];
+            let currRoll = data.current[i];
+            let tempRoll = data.temperature[i];
+            if (i >= 2) {
+                voltRoll = (data.voltage[i-2] + data.voltage[i-1] + data.voltage[i]) / 3;
+                currRoll = (data.current[i-2] + data.current[i-1] + data.current[i]) / 3;
+                tempRoll = (data.temperature[i-2] + data.temperature[i-1] + data.temperature[i]) / 3;
+            } else if (i === 1) {
+                voltRoll = (data.voltage[0] + data.voltage[1]) / 2;
+                currRoll = (data.current[0] + data.current[1]) / 2;
+                tempRoll = (data.temperature[0] + data.temperature[1]) / 2;
+            }
+            features.push({
+                Cycle: data.cycles[i],
+                Voltage: data.voltage[i],
+                Current: data.current[i],
+                Temperature: data.temperature[i],
+                Capacity: data.capacity[i],
+                Capacity_decay_rate: decayRate,
+                Voltage_change: voltChange,
+                Current_ratio: 0, // 暂时占位，稍后填充
+                Temp_change: tempChange,
+                Voltage_rolling_mean: voltRoll,
+                Current_rolling_mean: currRoll,
+                Temperature_rolling_mean: tempRoll
+            });
+        }
+        // 计算全局平均电流用于 Current_ratio
+        const meanCurrent = data.current.reduce((a,b)=>a+b,0)/n;
+        for (let i=0; i<n; i++) {
+            features[i].Current_ratio = data.current[i] / meanCurrent;
+        }
+        return features;
+    }
+
+    // 将特征数组转换为矩阵 [样本数, 特征数] 和 目标向量
+    function extractMatrix(features, targetSoH) {
+        const keys = ['Cycle', 'Voltage', 'Current', 'Temperature', 'Capacity', 
+                      'Capacity_decay_rate', 'Voltage_change', 'Current_ratio', 
+                      'Temp_change', 'Voltage_rolling_mean', 'Current_rolling_mean', 'Temperature_rolling_mean'];
+        const X = features.map(f => keys.map(k => f[k]));
+        const y = targetSoH.slice();
+        return { X, y, featureNames: keys };
+    }
+
+    // 划分数据集 (70% 训练, 15% 验证, 15% 测试) 这里为了简单，返回训练集和测试集（测试集用来评估）
+    function trainTestSplit(X, y, testRatio=0.3, randomSeed=42) {
+        // 固定随机种子打乱
+        const indices = Array.from({length: X.length}, (_,i) => i);
+        // 伪随机打乱
+        function shuffle(arr, seed) {
+            let a = [...arr];
+            let m = a.length;
+            while (m) {
+                m--;
+                let r = Math.floor(seededRandom(seed + m) * (m+1));
+                [a[m], a[r]] = [a[r], a[m]];
+            }
+            return a;
+        }
+        function seededRandom(seed) {
+            let x = Math.sin(seed) * 10000;
+            return x - Math.floor(x);
+        }
+        const shuffledIndices = shuffle(indices, randomSeed);
+        const splitIdx = Math.floor(X.length * (1 - testRatio));
+        const trainIdx = shuffledIndices.slice(0, splitIdx);
+        const testIdx = shuffledIndices.slice(splitIdx);
+        const X_train = trainIdx.map(i => X[i]);
+        const y_train = trainIdx.map(i => y[i]);
+        const X_test = testIdx.map(i => X[i]);
+        const y_test = testIdx.map(i => y[i]);
+        return { X_train, y_train, X_test, y_test };
+    }
+
+    // 标准化 (fit on train, transform on test)
+    function standardize(X_train, X_test) {
+        const dim = X_train[0].length;
+        const mean = new Array(dim).fill(0);
+        const std = new Array(dim).fill(0);
+        for (let i=0; i<X_train.length; i++) {
+            for (let j=0; j<dim; j++) mean[j] += X_train[i][j];
+        }
+        for (let j=0; j<dim; j++) mean[j] /= X_train.length;
+        for (let i=0; i<X_train.length; i++) {
+            for (let j=0; j<dim; j++) std[j] += (X_train[i][j] - mean[j])**2;
+        }
+        for (let j=0; j<dim; j++) std[j] = Math.sqrt(std[j] / X_train.length) + 1e-8;
+        const X_train_norm = X_train.map(row => row.map((val,j) => (val - mean[j]) / std[j]));
+        const X_test_norm = X_test.map(row => row.map((val,j) => (val - mean[j]) / std[j]));
+        return { X_train_norm, X_test_norm, mean, std };
+    }
+
+    // 线性回归 (梯度下降)
+    class LinearRegression {
+        constructor(lr=0.01, epochs=2000, verbose=false) {
+            this.lr = lr;
+            this.epochs = epochs;
+            this.verbose = verbose;
+            this.weights = null;
+            this.bias = 0;
+        }
+        fit(X, y) {
+            const n = X.length;
+            const m = X[0].length;
+            this.weights = new Array(m).fill(0);
+            this.bias = 0;
+            const losses = [];
+            for (let epoch=0; epoch<this.epochs; epoch++) {
+                let y_pred = X.map(row => this.predictOne(row));
+                let dw = new Array(m).fill(0);
+                let db = 0;
+                for (let i=0; i<n; i++) {
+                    const error = y_pred[i] - y[i];
+                    for (let j=0; j<m; j++) dw[j] += error * X[i][j];
+                    db += error;
+                }
+                for (let j=0; j<m; j++) this.weights[j] -= this.lr * dw[j] / n;
+                this.bias -= this.lr * db / n;
+                if (this.verbose && epoch%200===0) {
+                    const loss = this.mse(X, y);
+                    losses.push(loss);
+                }
+            }
+            return losses;
+        }
+        predictOne(x) {
+            let sum = this.bias;
+            for (let i=0; i<this.weights.length; i++) sum += this.weights[i] * x[i];
+            return sum;
+        }
+        predict(X) {
+            return X.map(x => this.predictOne(x));
+        }
+        mse(X, y) {
+            const preds = this.predict(X);
+            let sum = 0;
+            for (let i=0; i<y.length; i++) sum += (preds[i] - y[i])**2;
+            return sum / y.length;
+        }
+    }
+
+    // 评估指标
+    function computeMetrics(y_true, y_pred) {
+        const n = y_true.length;
+        const mse = y_true.reduce((sum, val, i) => sum + (val - y_pred[i])**2, 0) / n;
+        const mae = y_true.reduce((sum, val, i) => sum + Math.abs(val - y_pred[i]), 0) / n;
+        const meanY = y_true.reduce((a,b)=>a+b,0)/n;
+        const ssTot = y_true.reduce((sum, val) => sum + (val - meanY)**2, 0);
+        const ssRes = y_true.reduce((sum, val, i) => sum + (val - y_pred[i])**2, 0);
+        const r2 = 1 - ssRes/ssTot;
+        return { mse, mae, r2 };
+    }
+
+    // ---------- 全局变量 ----------
+    let currentModel = null;
+    let currentScaler = { mean: null, std: null };
+    let currentFeatureNames = [];
+    let currentXTestNorm = null;
+    let currentYTest = null;
+    let scatterChartInstance = null;
+
+    // 渲染表格
+    function renderTable(data) {
+        const tbody = document.getElementById('data-tbody');
+        tbody.innerHTML = '';
+        const n = Math.min(data.cycles.length, 20);
+        for (let i=0; i<n; i++) {
+            const row = tbody.insertRow();
+            row.insertCell(0).innerText = data.cycles[i].toFixed(0);
+            row.insertCell(1).innerText = data.voltage[i].toFixed(3);
+            row.insertCell(2).innerText = data.current[i].toFixed(2);
+            row.insertCell(3).innerText = data.temperature[i].toFixed(1);
+            row.insertCell(4).innerText = data.capacity[i].toFixed(2);
+            row.insertCell(5).innerText = data.soh[i].toFixed(1);
+        }
+    }
+
+    // 训练主流程
+    async function trainModel() {
+        const statusSpan = document.getElementById('train-status');
+        statusSpan.innerText = '🔄 生成数据&特征...';
+        // 生成数据
+        const rawData = generateDataset(500);
+        renderTable(rawData);
+        // 特征工程
+        const features = buildFeatures(rawData);
+        const { X, y, featureNames } = extractMatrix(features, rawData.soh);
+        currentFeatureNames = featureNames;
+        // 划分训练测试集
+        const { X_train, y_train, X_test, y_test } = trainTestSplit(X, y, 0.3, 42);
+        // 标准化
+        const { X_train_norm, X_test_norm, mean, std } = standardize(X_train, X_test);
+        currentScaler = { mean, std };
+        currentXTestNorm = X_test_norm;
+        currentYTest = y_test;
+        
+        statusSpan.innerText = '🧠 训练线性回归中...';
+        // 训练模型
+        const model = new LinearRegression(0.02, 3000, false);
+        model.fit(X_train_norm, y_train);
+        currentModel = model;
+        
+        // 预测测试集
+        const y_pred = model.predict(X_test_norm);
+        const metrics = computeMetrics(y_test, y_pred);
+        document.getElementById('mse-val').innerText = metrics.mse.toFixed(4);
+        document.getElementById('mae-val').innerText = metrics.mae.toFixed(4);
+        document.getElementById('r2-val').innerText = metrics.r2.toFixed(4);
+        
+        // 绘制散点图
+        if (scatterChartInstance) scatterChartInstance.destroy();
+        const ctx = document.getElementById('scatterChart').getContext('2d');
+        scatterChartInstance = new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: '预测 vs 真实',
+                    data: y_test.map((real, idx) => ({x: real, y: y_pred[idx]})),
+                    backgroundColor: '#3b82f6',
+                    pointRadius: 3,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: {
+                    x: { title: { display: true, text: '真实 SOH (%)' }, min: 50, max: 105 },
+                    y: { title: { display: true, text: '预测 SOH (%)' }, min: 50, max: 105 }
+                },
+                plugins: {
+                    tooltip: { callbacks: { label: (ctx) => `真实: ${ctx.parsed.x.toFixed(1)}%  预测: ${ctx.parsed.y.toFixed(1)}%` } },
+                    annotation: undefined
+                }
+            }
+        });
+        // 添加参考线 y=x (使用插件或简单叠加? 这里不加额外库，直接绘制直线是困难，但图表能看出趋势)
+        statusSpan.innerText = '✅ 训练完成！';
+        setTimeout(() => { statusSpan.innerText = ''; }, 2000);
+    }
+
+    // 单点预测
+    function predictSingle() {
+        if (!currentModel || !currentScaler.mean) {
+            alert('请先等待模型训练完成！');
+            return;
+        }
+        const cycle = parseFloat(document.getElementById('pred-cycle').value);
+        const voltage = parseFloat(document.getElementById('pred-voltage').value);
+        const current = parseFloat(document.getElementById('pred-current').value);
+        const temp = parseFloat(document.getElementById('pred-temp').value);
+        const capacity = parseFloat(document.getElementById('pred-capacity').value);
+        
+        // 需要构造衍生特征（需要全局数据均值等信息，直接从训练数据中获取平均值模拟）
+        // 简单方式：从已经生成的原始数据获取第一个样本的初始容量和平均电流
+        // 为了准确，我们从原始数据获取整体平均电流，首次容量等。使用全局变量：用最后一次训练的rawData
+        // 简便起见：重建一次最新数据获取统计量 (也可以缓存)
+        const raw = generateDataset(500);
+        const initCapacity = raw.capacity[0];
+        const meanCurrent = raw.current.reduce((a,b)=>a+b,0)/raw.current.length;
+        const decayRate = (initCapacity - capacity) / initCapacity;
+        const voltageChange = 0;  // 单点无历史变化，填0
+        const currentRatio = current / meanCurrent;
+        const tempChange = 0;
+        // 滚动均值：单点无法获得真实窗口，用自身近似
+        const voltRoll = voltage;
+        const currRoll = current;
+        const tempRoll = temp;
+        
+        const featureVector = [
+            cycle, voltage, current, temp, capacity,
+            decayRate, voltageChange, currentRatio, tempChange,
+            voltRoll, currRoll, tempRoll
+        ];
+        // 标准化
+        const normVector = featureVector.map((val, idx) => (val - currentScaler.mean[idx]) / currentScaler.std[idx]);
+        const predSOH = currentModel.predictOne(normVector);
+        const finalSOH = Math.min(100, Math.max(50, predSOH));
+        document.getElementById('soh-predicted').innerText = finalSOH.toFixed(1);
+        const adviceDiv = document.getElementById('soh-advice');
+        if (finalSOH < 70) adviceDiv.innerHTML = '⚠️ 电池健康状态较低，建议考虑更换。';
+        else if (finalSOH < 85) adviceDiv.innerHTML = 'ℹ️ 电池健康状态一般，可继续使用但需关注。';
+        else adviceDiv.innerHTML = '✅ 电池健康状态良好！';
+    }
+
+    // 初始化
+    window.onload = async () => {
+        await trainModel();
+        document.getElementById('retrain-btn').addEventListener('click', async () => {
+            await trainModel();
+        });
+        document.getElementById('predict-btn').addEventListener('click', predictSingle);
+    };
+</script>
+</body>
+</html>
